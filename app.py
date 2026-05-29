@@ -5,7 +5,7 @@ from datetime import date
 
 st.set_page_config(layout="wide")
 
-# Inicialización del estado
+# Inicialización
 if 'agentes' not in st.session_state:
     st.session_state.agentes = {
         "Barros": {"pref_m": [], "pref_t": [], "disp_m": [], "disp_t": [], "bloqueos": []},
@@ -14,74 +14,56 @@ if 'agentes' not in st.session_state:
         "Ricartez": {"pref_m": [], "pref_t": [], "disp_m": [], "disp_t": [], "bloqueos": []}
     }
 
-st.title("🗓️ Planificador de Turnos - Autocompletado Equitativo")
+if 'grilla_data' not in st.session_state:
+    st.session_state.grilla_data = {}
+
+st.title("🗓️ Planificador - Motor de Asignación")
 
 mes_anio = st.date_input("Seleccionar mes", value=date(2026, 6, 1))
 dias_mes = calendar.monthrange(mes_anio.year, mes_anio.month)[1]
 lista_dias = list(range(1, dias_mes + 1))
 dias_semana = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
 
-# Inicializar grilla si no existe o cambió el mes
-if 'grilla' not in st.session_state or st.session_state.get('mes_actual') != mes_anio.month:
-    st.session_state.grilla = pd.DataFrame(index=lista_dias, columns=['M', 'T']).fillna("")
-    st.session_state.mes_actual = mes_anio.month
-
-# --- SIDEBAR: CONFIGURACIÓN ---
 with st.sidebar:
-    st.header("⚙️ Configuración")
     for nombre in st.session_state.agentes:
         with st.expander(f"Agente: {nombre}"):
-            st.write("--- Días del Mes ---")
             st.session_state.agentes[nombre]['pref_m'] = st.multiselect("Días exactos (M)", lista_dias, key=f"dm_{nombre}")
             st.session_state.agentes[nombre]['pref_t'] = st.multiselect("Días exactos (T)", lista_dias, key=f"dt_{nombre}")
-            st.write("--- Días de la Semana ---")
             st.session_state.agentes[nombre]['disp_m'] = st.multiselect("Semanal (M)", dias_semana, key=f"sm_{nombre}")
             st.session_state.agentes[nombre]['disp_t'] = st.multiselect("Semanal (T)", dias_semana, key=f"st_{nombre}")
-            st.write("--- Bloqueos ---")
             st.session_state.agentes[nombre]['bloqueos'] = st.multiselect("Días NO trabajar", lista_dias, key=f"bl_{nombre}")
 
-# --- MOTOR DE AUTOCOMPLETADO ---
-def autocompletar():
-    for d in lista_dias:
-        fecha = date(mes_anio.year, mes_anio.month, d)
-        dia_nombre = dias_semana[fecha.weekday()]
+    if st.button("🚀 Autocompletar"):
+        # Resetear datos de la grilla
+        st.session_state.grilla_data = {(d, t): "" for d in lista_dias for t in ['M', 'T']}
         
-        for t in ['M', 'T']:
-            if st.session_state.grilla.loc[d, t] == "":
-                # 1. Candidatos preferentes (Día exacto o Semanal)
-                candidatos_preferentes = [
-                    n for n, cfg in st.session_state.agentes.items()
-                    if d not in cfg['bloqueos'] and 
-                    (d in (cfg['pref_m'] if t == 'M' else cfg['pref_t']) or 
-                     dia_nombre in (cfg['disp_m'] if t == 'M' else cfg['disp_t']))
-                ]
-                
-                # 2. Comodines (Cualquiera que no esté bloqueado)
-                candidatos_comodines = [
-                    n for n, cfg in st.session_state.agentes.items()
-                    if d not in cfg['bloqueos']
-                ]
-                
-                # Priorizar preferentes, sino usar comodines
-                lista_final = candidatos_preferentes if candidatos_preferentes else candidatos_comodines
-                
-                if lista_final:
-                    # Ordenar por el que menos turnos tiene en total (Equidad)
-                    lista_final.sort(key=lambda n: sum((st.session_state.grilla == n).sum()))
-                    st.session_state.grilla.loc[d, t] = lista_final[0]
+        for d in lista_dias:
+            fecha = date(mes_anio.year, mes_anio.month, d)
+            dia_nombre = dias_semana[fecha.weekday()]
+            
+            for t in ['M', 'T']:
+                candidatos = [n for n, cfg in st.session_state.agentes.items() if d not in cfg['bloqueos']]
+                if candidatos:
+                    # Ordenar: 1) Preferentes, 2) Menos turnos acumulados
+                    candidatos.sort(key=lambda n: (
+                        0 if (d in (st.session_state.agentes[n]['pref_m'] if t == 'M' else st.session_state.agentes[n]['pref_t']) or 
+                              dia_nombre in (st.session_state.agentes[n]['disp_m'] if t == 'M' else st.session_state.agentes[n]['disp_t'])) 
+                        else 1,
+                        sum(1 for k, v in st.session_state.grilla_data.items() if v == n)
+                    ))
+                    st.session_state.grilla_data[(d, t)] = candidatos[0]
+        st.rerun()
 
-if st.sidebar.button("🚀 Autocompletar Planilla"):
-    autocompletar()
-
-# Visualización y edición manual
+# Mostrar Planilla
 for d in lista_dias:
     cols = st.columns([1, 1, 4, 4])
-    cols[0].write(f"**{d}** ({dias_semana[date(mes_anio.year, mes_anio.month, d).weekday()]})")
+    cols[0].write(f"**{d}**")
     
-    val_m = cols[2].selectbox(f"M {d}", [""] + list(st.session_state.agentes.keys()), 
-                               key=f"m_{d}", index=0 if st.session_state.grilla.loc[d, 'M'] == "" else list(st.session_state.agentes.keys()).index(st.session_state.grilla.loc[d, 'M']) + 1)
-    val_t = cols[3].selectbox(f"T {d}", [""] + list(st.session_state.agentes.keys()), 
-                               key=f"t_{d}", index=0 if st.session_state.grilla.loc[d, 'T'] == "" else list(st.session_state.agentes.keys()).index(st.session_state.grilla.loc[d, 'T']) + 1)
+    # Asignar valores desde el estado
+    m_val = st.session_state.grilla_data.get((d, 'M'), "")
+    t_val = st.session_state.grilla_data.get((d, 'T'), "")
     
-    st.session_state.grilla.loc[d, 'M'] = val_m
-    st.session_state.grilla.loc[d, 'T'] = val_t
+    options = [""] + list(st.session_state.agentes.keys())
+    
+    st.session_state.grilla_data[(d, 'M')] = cols[2].selectbox(f"M {d}", options, index=options.index(m_val) if m_val in options else 0, key=f"m_{d}")
+    st.session_state.grilla_data[(d, 'T')] = cols[3].selectbox(f"T {d}", options, index=options.index(t_val) if t_val in options else 0, key=f"t_{d}")
