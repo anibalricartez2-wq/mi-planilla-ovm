@@ -5,73 +5,58 @@ from datetime import date
 
 st.set_page_config(layout="wide")
 
-# 1. Inicialización de datos
+# Inicialización
 if 'agentes' not in st.session_state:
     st.session_state.agentes = {
-        "Barros": {"pref_m": [], "pref_t": [], "bloqueos": []},
-        "Garcia": {"pref_m": [], "pref_t": [], "bloqueos": []},
-        "Sanchez": {"pref_m": [], "pref_t": [], "bloqueos": []},
-        "Ricartez": {"pref_m": [], "pref_t": [], "bloqueos": []}
+        "Barros": {"disp_m": [], "disp_t": [], "bloqueos": []},
+        "Garcia": {"disp_m": [], "disp_t": [], "bloqueos": []},
+        "Sanchez": {"disp_m": [], "disp_t": [], "bloqueos": []},
+        "Ricartez": {"disp_m": [], "disp_t": [], "bloqueos": []}
     }
 
-st.title("🗓️ Planificador con Control de Equidad")
+st.title("🗓️ Planificador con Restricciones Semanales")
 
-# 2. Selección del mes
 mes_anio = st.date_input("Seleccionar mes", value=date(2026, 6, 1))
 dias_mes = calendar.monthrange(mes_anio.year, mes_anio.month)[1]
 lista_dias = list(range(1, dias_mes + 1))
+dias_semana = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
 
-# 3. Inicialización/Reinicio de Grilla si cambia el mes
-if 'mes_actual' not in st.session_state or st.session_state.mes_actual != mes_anio.month:
-    st.session_state.grilla = pd.DataFrame(index=lista_dias, columns=['M', 'T']).fillna("")
-    st.session_state.mes_actual = mes_anio.month
-
-# 4. Sidebar para preferencias
+# --- SIDEBAR: CONFIGURACIÓN POR AGENTE ---
 with st.sidebar:
-    st.header("⚙️ Preferencias y Bloqueos")
+    st.header("⚙️ Configuración")
     for nombre in st.session_state.agentes:
         with st.expander(f"Agente: {nombre}"):
-            st.session_state.agentes[nombre]['pref_m'] = st.multiselect("Prefiere Mañana", lista_dias, key=f"m_{nombre}")
-            st.session_state.agentes[nombre]['pref_t'] = st.multiselect("Prefiere Tarde", lista_dias, key=f"t_{nombre}")
-            st.session_state.agentes[nombre]['bloqueos'] = st.multiselect("Días NO trabajar", lista_dias, key=f"b_{nombre}")
+            st.session_state.agentes[nombre]['disp_m'] = st.multiselect("Días semana Mañana", dias_semana, key=f"dm_{nombre}")
+            st.session_state.agentes[nombre]['disp_t'] = st.multiselect("Días semana Tarde", dias_semana, key=f"dt_{nombre}")
+            st.session_state.agentes[nombre]['bloqueos'] = st.multiselect("Días NO trabajar", lista_dias, key=f"bl_{nombre}")
 
-# 5. Visualización de Casillas
-st.subheader("Asignación de Turnos")
+# --- MOTOR DE AUTOCOMPLETADO ---
+def autocompletar():
+    for d in lista_dias:
+        fecha = date(mes_anio.year, mes_anio.month, d)
+        dia_nombre = dias_semana[fecha.weekday()]
+        
+        for t in ['M', 'T']:
+            if st.session_state.grilla.loc[d, t] == "":
+                # Filtrar candidatos que: 1. No estén bloqueados, 2. Tengan disponibilidad ese día
+                candidatos = [n for n, cfg in st.session_state.agentes.items() 
+                              if d not in cfg['bloqueos'] and 
+                              (dia_nombre in (cfg['disp_m'] if t == 'M' else cfg['disp_t']))]
+                
+                if candidatos:
+                    # Ordenar por el que menos turnos tenga (Equidad)
+                    candidatos.sort(key=lambda n: sum((st.session_state.grilla == n).sum()))
+                    st.session_state.grilla.loc[d, t] = candidatos[0]
+
+# --- INTERFAZ ---
+if 'grilla' not in st.session_state:
+    st.session_state.grilla = pd.DataFrame(index=lista_dias, columns=['M', 'T']).fillna("")
+
+if st.sidebar.button("🚀 Autocompletar Planilla"):
+    autocompletar()
+
 for d in lista_dias:
     cols = st.columns([1, 1, 4, 4])
-    cols[0].write(f"**Día {d}**")
-    
-    # Usamos un callback para actualizar el estado del dataframe sin errores de loc
-    val_m = cols[2].selectbox(f"Mañana {d}", [""] + list(st.session_state.agentes.keys()), 
-                              index=0 if st.session_state.grilla.loc[d, 'M'] == "" else list(st.session_state.agentes.keys()).index(st.session_state.grilla.loc[d, 'M']) + 1,
-                              key=f"m_sel_{d}")
-    
-    val_t = cols[3].selectbox(f"Tarde {d}", [""] + list(st.session_state.agentes.keys()), 
-                              index=0 if st.session_state.grilla.loc[d, 'T'] == "" else list(st.session_state.agentes.keys()).index(st.session_state.grilla.loc[d, 'T']) + 1,
-                              key=f"t_sel_{d}")
-    
-    st.session_state.grilla.loc[d, 'M'] = val_m
-    st.session_state.grilla.loc[d, 'T'] = val_t
-
-# 6. Botón de Validación
-if st.button("📊 Validar Equidad y Cargas"):
-    st.subheader("📊 Análisis de Equidad (M vs T)")
-    data_resumen = []
-    
-    for nombre in st.session_state.agentes:
-        puntos = 0
-        turnos_m = 0
-        turnos_t = 0
-        for d in lista_dias:
-            fecha_actual = date(mes_anio.year, mes_anio.month, d)
-            valor_dia = 18 if fecha_actual.weekday() >= 5 else 9
-            if st.session_state.grilla.loc[d, 'M'] == nombre:
-                turnos_m += 1
-                puntos += valor_dia
-            if st.session_state.grilla.loc[d, 'T'] == nombre:
-                turnos_t += 1
-                puntos += valor_dia
-        data_resumen.append({"Agente": nombre, "Turnos M": turnos_m, "Turnos T": turnos_t, "Puntos Totales": puntos})
-    
-    df_resumen = pd.DataFrame(data_resumen)
-    st.table(df_resumen)
+    cols[0].write(f"**{d}** ({dias_semana[date(mes_anio.year, mes_anio.month, d).weekday()]})")
+    st.session_state.grilla.loc[d, 'M'] = cols[2].selectbox(f"M {d}", [""] + list(st.session_state.agentes.keys()), key=f"m_{d}")
+    st.session_state.grilla.loc[d, 'T'] = cols[3].selectbox(f"T {d}", [""] + list(st.session_state.agentes.keys()), key=f"t_{d}")
