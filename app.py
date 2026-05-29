@@ -1,57 +1,77 @@
 import streamlit as st
 import pandas as pd
 import calendar
+from datetime import date
 
 st.set_page_config(layout="wide")
 
-# Inicialización de estado para persistir los datos
-if 'grilla' not in st.session_state:
-    st.session_state.grilla = {} # Aquí guardaremos {fecha: {'M': '...', 'T': '...'}}
+if 'agentes' not in st.session_state:
     st.session_state.agentes = {
-        "Barros": {"pref_m": [], "pref_t": [], "bloqueos": [], "licencias": [], "puntos": 0},
-        "Garcia": {"pref_m": [], "pref_t": [], "bloqueos": [], "licencias": [], "puntos": 0},
-        "Sanchez": {"pref_m": [], "pref_t": [], "bloqueos": [], "licencias": [], "puntos": 0},
-        "Ricartez": {"pref_m": [], "pref_t": [], "bloqueos": [], "licencias": [], "puntos": 0}
+        "Barros": {"pref_m": [], "pref_t": [], "bloqueos": []},
+        "Garcia": {"pref_m": [], "pref_t": [], "bloqueos": []},
+        "Sanchez": {"pref_m": [], "pref_t": [], "bloqueos": []},
+        "Ricartez": {"pref_m": [], "pref_t": [], "bloqueos": []}
     }
 
-st.title("🗓️ Planificador de Turnos - Asistente de Gestión")
+st.title("🗓️ Planificador con Control de Equidad")
 
-# 1. Configuración del Mes
-mes_anio = st.date_input("Seleccionar mes", value=pd.to_datetime("2026-06-01"))
-meta_horas = st.number_input("Meta de puntos mensuales por agente", value=130)
+mes_anio = st.date_input("Seleccionar mes", value=date(2026, 6, 1))
+dias_mes = calendar.monthrange(mes_anio.year, mes_anio.month)[1]
+lista_dias = list(range(1, dias_mes + 1))
 
-# 2. Sidebar: Gestión de Agentes
+# Sidebar para preferencias
 with st.sidebar:
-    st.header("⚙️ Configuración de Agentes")
+    st.header("⚙️ Preferencias y Bloqueos")
     for nombre in st.session_state.agentes:
         with st.expander(f"Agente: {nombre}"):
-            st.session_state.agentes[nombre]['pref_m'] = st.multiselect("Preferencia Mañana", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], key=f"m_{nombre}")
-            st.session_state.agentes[nombre]['pref_t'] = st.multiselect("Preferencia Tarde", ["Lu","Ma","Mi","Ju","Vi","Sá","Do"], key=f"t_{nombre}")
-            st.session_state.agentes[nombre]['bloqueos'] = st.text_input("Días bloqueados (ej: 1, 5, 20)", key=f"b_{nombre}")
+            st.session_state.agentes[nombre]['pref_m'] = st.multiselect("Prefiere Mañana", lista_dias, key=f"m_{nombre}")
+            st.session_state.agentes[nombre]['pref_t'] = st.multiselect("Prefiere Tarde", lista_dias, key=f"t_{nombre}")
+            st.session_state.agentes[nombre]['bloqueos'] = st.multiselect("Días NO trabajar", lista_dias, key=f"b_{nombre}")
 
-# 3. Visualización de Casillas (Matriz)
-st.subheader("Asignación de Turnos")
-dias_mes = calendar.monthrange(mes_anio.year, mes_anio.month)[1]
+# Grilla de asignación
+if 'grilla' not in st.session_state:
+    st.session_state.grilla = pd.DataFrame(index=lista_dias, columns=['M', 'T'])
 
-# Crear dataframe de trabajo
-cols = st.columns([1, 1, 2, 2])
-for d in range(1, dias_mes + 1):
-    fecha = f"{mes_anio.year}-{mes_anio.month:02d}-{d:02d}"
-    dia_sem = calendar.day_abbr[calendar.weekday(mes_anio.year, mes_anio.month, d)]
+for d in lista_dias:
+    cols = st.columns([1, 1, 4, 4])
+    cols[0].write(f"**Día {d}**")
+    st.session_state.grilla.loc[d, 'M'] = cols[2].selectbox(f"Mañana {d}", [""] + list(st.session_state.agentes.keys()), key=f"m_sel_{d}")
+    st.session_state.grilla.loc[d, 'T'] = cols[3].selectbox(f"Tarde {d}", [""] + list(st.session_state.agentes.keys()), key=f"t_sel_{d}")
+
+if st.button("📊 Validar Equidad y Cargas"):
+    st.subheader("📊 Análisis de Equidad (M vs T)")
     
-    with st.container():
-        c1, c2, c3, c4 = st.columns([1, 1, 2, 2])
-        c1.write(f"**{d}**")
-        c2.write(f"{dia_sem}")
+    # Tabla para mostrar conteos
+    data_resumen = []
+    
+    for nombre in st.session_state.agentes:
+        puntos = 0
+        turnos_m = 0
+        turnos_t = 0
         
-        # Selección de turnos
-        asignacion_m = c3.selectbox(f"Mañana {d}", [""] + list(st.session_state.agentes.keys()), key=f"m_{d}")
-        asignacion_t = c4.selectbox(f"Tarde {d}", [""] + list(st.session_state.agentes.keys()), key=f"t_{d}")
-
-# 4. Cálculo de Estado
-if st.button("Calcular Estado Actual"):
-    # Aquí irá la lógica que suma los puntos (9 o 18) y compara con la meta
-    st.write("---")
-    st.subheader("Estado de Cumplimiento")
-    for nombre, datos in st.session_state.agentes.items():
-        st.write(f"**{nombre}**: {datos['puntos']} puntos acumulados. Faltan: {max(0, meta_horas - datos['puntos'])} puntos.")
+        for d in lista_dias:
+            fecha_actual = date(mes_anio.year, mes_anio.month, d)
+            valor_dia = 18 if fecha_actual.weekday() >= 5 else 9
+            
+            # Sumar M
+            if st.session_state.grilla.loc[d, 'M'] == nombre:
+                turnos_m += 1
+                puntos += valor_dia
+            # Sumar T
+            if st.session_state.grilla.loc[d, 'T'] == nombre:
+                turnos_t += 1
+                puntos += valor_dia
+                
+        data_resumen.append({"Agente": nombre, "Turnos M": turnos_m, "Turnos T": turnos_t, "Puntos Totales": puntos})
+    
+    df_resumen = pd.DataFrame(data_resumen)
+    st.table(df_resumen)
+    
+    # Alerta si hay desigualdad
+    st.subheader("⚠️ Avisos de Desigualdad")
+    max_m = df_resumen['Turnos M'].max()
+    min_m = df_resumen['Turnos M'].min()
+    if max_m - min_m > 1:
+        st.warning(f"Desigualdad en Mañanas: La diferencia entre el que más y menos tiene es de {max_m - min_m} turnos.")
+    else:
+        st.success("Distribución de mañanas equitativa.")
