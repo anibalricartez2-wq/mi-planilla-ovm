@@ -10,39 +10,42 @@ if 'agentes' not in st.session_state:
     st.session_state.prefs = {n: {"pref_m":[], "pref_t":[], "disp_m":[], "disp_t":[], "bloq":[]} for n in st.session_state.agentes}
     st.session_state.grilla = {} 
 
-st.title("🗓️ Planificador con Calendario")
+st.title("🗓️ Planificador: Configuración Completa M/T")
 
-# Configuración de fecha (Junio 2026)
 anio, mes = 2026, 6
 dias_mes = calendar.monthrange(anio, mes)[1]
 dias_semana_nombres = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
 
-# 2. MENU DE RESTRICCIONES
+# 2. MENU DE RESTRICCIONES (Corregido con Tarde)
 with st.sidebar:
-    st.header("Configuración")
+    st.header("Restricciones")
     for n in st.session_state.agentes:
         with st.expander(f"Restricciones: {n}"):
-            st.session_state.prefs[n]['pref_m'] = st.multiselect("Días (M)", range(1, dias_mes+1), key=f"dm_{n}")
-            st.session_state.prefs[n]['disp_m'] = st.multiselect("Semanal (M)", dias_semana_nombres, key=f"sm_{n}")
+            st.write("--- Días Exactos ---")
+            st.session_state.prefs[n]['pref_m'] = st.multiselect("Mañana", range(1, dias_mes+1), key=f"dm_{n}")
+            st.session_state.prefs[n]['pref_t'] = st.multiselect("Tarde", range(1, dias_mes+1), key=f"dt_{n}")
+            st.write("--- Semanal (Lu-Do) ---")
+            st.session_state.prefs[n]['disp_m'] = st.multiselect("Semanal Mañana", dias_semana_nombres, key=f"sm_{n}")
+            st.session_state.prefs[n]['disp_t'] = st.multiselect("Semanal Tarde", dias_semana_nombres, key=f"st_{n}")
+            st.write("--- Bloqueos ---")
             st.session_state.prefs[n]['bloq'] = st.multiselect("Días NO trabajar", range(1, dias_mes+1), key=f"bl_{n}")
 
 # 3. MOTOR DE AUTOCOMPLETADO
 def autocompletar():
     st.session_state.grilla = {}
     for d in range(1, dias_mes + 1):
-        # Calcular qué día de la semana cae el día 'd' de Junio 2026
-        dia_semana_idx = date(anio, mes, d).weekday()
-        dia_nombre = dias_semana_nombres[dia_semana_idx]
-        
+        dia_nombre = dias_semana_nombres[date(anio, mes, d).weekday()]
         for t in ['M', 'T']:
             cands = [n for n in st.session_state.agentes if d not in st.session_state.prefs[n]['bloq']]
             
             def criterio(n):
-                # Prioridad 1: Día exacto, Prioridad 2: Día semanal, Prioridad 3: Equidad
-                p1 = 0 if d in (st.session_state.prefs[n]['pref_m'] if t == 'M' else st.session_state.prefs[n]['pref_t']) else 1
-                p2 = 0 if dia_nombre in (st.session_state.prefs[n]['disp_m'] if t == 'M' else st.session_state.prefs[n]['disp_t']) else 1
+                # Prioridad 1: Día exacto, P2: Día semanal, P3: Equidad
+                # Si el turno es M, mira pref_m/disp_m. Si es T, mira pref_t/disp_t.
+                prefs = st.session_state.prefs[n]
+                es_pref_exacta = 0 if d in (prefs['pref_m'] if t == 'M' else prefs['pref_t']) else 1
+                es_pref_sem = 0 if dia_nombre in (prefs['disp_m'] if t == 'M' else prefs['disp_t']) else 1
                 turnos = sum(1 for k, v in st.session_state.grilla.items() if v == n)
-                return (p1, p2, turnos)
+                return (es_pref_exacta, es_pref_sem, turnos)
             
             cands.sort(key=criterio)
             if cands:
@@ -52,17 +55,12 @@ if st.sidebar.button("🚀 Autocompletar"):
     autocompletar()
     st.rerun()
 
-# 4. INTERFAZ CON DIAS DE LA SEMANA
+# 4. INTERFAZ
 st.write("---")
 for d in range(1, dias_mes + 1):
-    dia_semana_idx = date(anio, mes, d).weekday()
-    dia_str = dias_semana_nombres[dia_semana_idx]
-    
-    # Marcamos en rojo los fines de semana (Sá/Do) para visibilidad
-    color = "red" if dia_semana_idx >= 5 else "black"
-    
+    dia_str = dias_semana_nombres[date(anio, mes, d).weekday()]
     c1, c2, c3 = st.columns([1, 2, 2])
-    c1.markdown(f"**Día {d} (<span style='color:{color}'>{dia_str}</span>)**", unsafe_allow_html=True)
+    c1.write(f"**Día {d} ({dia_str})**")
     
     m_val = st.session_state.grilla.get((d, 'M'), "")
     t_val = st.session_state.grilla.get((d, 'T'), "")
