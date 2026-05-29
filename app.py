@@ -29,9 +29,10 @@ with st.sidebar:
             st.session_state.prefs[n]['bloq'] = st.multiselect("NO trabajar", range(1, num_dias+1), key=f"bl_{n}")
 
 # 3. MOTOR DE AUTOCOMPLETADO
-def autocompletar():
+if st.sidebar.button("🚀 Autocompletar"):
     dias_semana = ["Lu", "Ma", "Mi", "Ju", "Vi", "Sá", "Do"]
-    st.session_state.grilla = {}
+    st.session_state.grilla = {} # Limpiamos la grilla
+    
     for d in range(1, num_dias + 1):
         dia_nombre = dias_semana[date(anio, mes, d).weekday()]
         for t in ['M', 'T']:
@@ -43,9 +44,8 @@ def autocompletar():
             ))
             if cands:
                 st.session_state.grilla[(d, t)] = cands[0]
-
-if st.sidebar.button("🚀 Autocompletar"):
-    autocompletar()
+    
+    # FORZAMOS LA RECARGA COMPLETAMENTE
     st.rerun()
 
 # 4. PLANILLA
@@ -57,19 +57,20 @@ for d in range(1, num_dias + 1):
     c1, c2, c3 = st.columns([1, 2, 2])
     c1.write(f"**Día {d} ({dia_str})**")
     
-    # Valores de la grilla
+    # Obtenemos valor del estado
     val_m = st.session_state.grilla.get((d, 'M'), "")
     val_t = st.session_state.grilla.get((d, 'T'), "")
     
-    # Selectbox simplificado para evitar errores de índice
+    # IMPORTANTE: Usamos un key único que cambie si el autocompletado llena algo
+    # Esto obliga a Streamlit a redibujar el selector
     opciones = [""] + st.session_state.agentes
     
-    # Determinamos el índice seguro
-    idx_m = opciones.index(val_m) if val_m in opciones else 0
-    idx_t = opciones.index(val_t) if val_t in opciones else 0
-    
-    st.session_state.grilla[(d, 'M')] = c2.selectbox(f"M {d}", opciones, index=idx_m, key=f"M_{d}_{anio}_{mes}")
-    st.session_state.grilla[(d, 'T')] = c3.selectbox(f"T {d}", opciones, index=idx_t, key=f"T_{d}_{anio}_{mes}")
+    st.session_state.grilla[(d, 'M')] = c2.selectbox(f"M {d}", opciones, 
+                                                    index=opciones.index(val_m) if val_m in opciones else 0, 
+                                                    key=f"M_{d}_{val_m}")
+    st.session_state.grilla[(d, 'T')] = c3.selectbox(f"T {d}", opciones, 
+                                                    index=opciones.index(val_t) if val_t in opciones else 0, 
+                                                    key=f"T_{d}_{val_t}")
 
 if st.sidebar.button("🗑️ Limpiar"):
     st.session_state.grilla = {}
