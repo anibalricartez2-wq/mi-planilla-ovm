@@ -11,12 +11,13 @@ if 'agentes' not in st.session_state:
     st.session_state.prefs = {n: {"pref_m":[], "pref_t":[], "bloq":[]} for n in st.session_state.agentes}
     st.session_state.grilla = {}
 
-st.title("🗓️ Planificador con Equidad Primero")
+st.title("🗓️ Planificador de Turnos - Equitativo")
 
 fecha_sel = st.date_input("Seleccionar mes", date(2026, 6, 1))
 anio, mes = fecha_sel.year, fecha_sel.month
 _, num_dias = calendar.monthrange(anio, mes)
 
+# 2. MENU SIDEBAR
 with st.sidebar:
     limite_horas = st.number_input("Límite horas", value=130)
     horas_turno = st.number_input("Horas por turno", value=6.5)
@@ -26,19 +27,19 @@ with st.sidebar:
             st.session_state.prefs[n]['pref_t'] = st.multiselect("Tarde", range(1, num_dias+1), key=f"dt_{n}")
             st.session_state.prefs[n]['bloq'] = st.multiselect("NO trabajar", range(1, num_dias+1), key=f"bl_{n}")
 
-# 2. MOTOR: Equidad primero (baja carga) -> Restricciones después
+# 3. MOTOR DE AUTOCOMPLETADO (Equidad primero)
 def ejecutar_autocompletado():
     temp_grilla = {}
     turnos_acumulados = {n: 0 for n in st.session_state.agentes}
     
     for d in range(1, num_dias + 1):
         for t in ['M', 'T']:
-            # Ordenar agentes por carga de trabajo (Equidad)
+            # Ordenar agentes por carga de trabajo (Equidad absoluta)
             agentes_ordenados = sorted(st.session_state.agentes, key=lambda n: turnos_acumulados[n])
             
-            # Seleccionar candidato apto (no bloqueado y con cupo de horas)
             candidato_elegido = None
             for n in agentes_ordenados:
+                # Verificar restricciones
                 if d not in st.session_state.prefs[n]['bloq']:
                     if (turnos_acumulados[n] + 1) * horas_turno <= limite_horas:
                         candidato_elegido = n
@@ -53,7 +54,7 @@ if st.sidebar.button("🚀 Autocompletar"):
     ejecutar_autocompletado()
     st.rerun()
 
-# 3. PDF CORREGIDO
+# 4. EXPORTAR PDF (Solución al error AttributeError)
 def generar_pdf():
     pdf = FPDF()
     pdf.add_page()
@@ -64,12 +65,18 @@ def generar_pdf():
         m = st.session_state.grilla.get((d, 'M'), "-")
         t = st.session_state.grilla.get((d, 'T'), "-")
         pdf.cell(200, 8, txt=f"Dia {d}: M: {m} | T: {t}", ln=True)
-    # Corrección: output(dest='S') devuelve string, .encode('latin-1') lo hace bytes
-    return pdf.output(dest='S').encode('latin-1')
+    
+    # Esta es la forma segura en fpdf2
+    return pdf.output()
 
-st.sidebar.download_button("📥 Descargar PDF", data=generar_pdf(), file_name="planilla.pdf", mime="application/pdf")
+st.sidebar.download_button(
+    label="📥 Descargar PDF",
+    data=generar_pdf(),
+    file_name="planilla.pdf",
+    mime="application/pdf"
+)
 
-# 4. PLANILLA
+# 5. PLANILLA
 for d in range(1, num_dias + 1):
     c1, c2, c3 = st.columns([1, 2, 2])
     c1.write(f"**Día {d}**")
